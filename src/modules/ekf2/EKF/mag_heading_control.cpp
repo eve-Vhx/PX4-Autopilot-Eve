@@ -57,8 +57,6 @@ void Ekf::controlMagHeadingFusion(const magSample &mag_sample, const bool common
 		}
 	}
 
-	_control_status.flags.mag_field_disturbed = magFieldStrengthDisturbed(mag_sample.mag - mag_bias);
-
 	// calculate mag heading
 	// Rotate the measurements into earth frame using the zero yaw angle
 	const Dcmf R_to_earth = updateYawInRotMat(0.f, _R_to_earth);
@@ -108,13 +106,15 @@ void Ekf::controlMagHeadingFusion(const magSample &mag_sample, const bool common
 			const bool declination_changed = _control_status_prev.flags.mag_hdg
 							 && (fabsf(declination - _mag_heading_last_declination) > math::radians(3.f));
 
-			if (mag_sample.reset || declination_changed) {
+			const bool wmm_updated = (_mag_wmm_gps_time_last_set_us > aid_src.time_last_fuse);
+
+			if (mag_sample.reset || declination_changed || wmm_updated) {
 				ECL_INFO("reset to %s", AID_SRC_NAME);
 				resetMagHeading(_mag_lpf.getState());
 				aid_src.time_last_fuse = _time_delayed_us;
 
 			} else {
-				fuseYaw(aid_src.innovation, aid_src.observation_variance, aid_src);
+				fuseYaw(aid_src);
 			}
 
 			const bool is_fusion_failing = isTimedOut(aid_src.time_last_fuse, _params.reset_timeout_max);

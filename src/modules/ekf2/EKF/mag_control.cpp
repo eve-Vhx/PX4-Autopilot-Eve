@@ -59,11 +59,18 @@ void Ekf::controlMagFusion()
 	if (!_control_status.flags.mag && _mag_decl_cov_reset) {
 		const bool yaw_estimator_reset = _information_events.flags.yaw_aligned_to_imu_gps;
 		const bool heading_was_reset = (_state_reset_status.reset_count.quat != _state_reset_count_prev.quat);
+		const bool gps_wmm_was_reset = (_mag_wmm_gps_time_last_set_us == _time_delayed_us);
 
-		if (yaw_estimator_reset || heading_was_reset) {
-			ECL_INFO("yaw reset, stopping mag fusion to force reset/reinit");
+		if (yaw_estimator_reset || heading_was_reset || gps_wmm_was_reset) {
+			if (yaw_estimator_reset || heading_was_reset) {
+				ECL_INFO("yaw reset, stopping mag fusion to force reset/reinit");
+			} else if (gps_wmm_was_reset) {
+				ECL_INFO("GPS WMM initialized, stopping mag fusion to force reset/reinit");
+			}
+
 			stopMagFusion();
 			resetMagCov();
+			_time_last_mov_3d_mag_suitable = _time_delayed_us; // reset
 		}
 	}
 
@@ -77,6 +84,7 @@ void Ekf::controlMagFusion()
 
 			_state.mag_B.zero();
 			resetMagCov();
+			_time_last_mov_3d_mag_suitable = _time_delayed_us; // reset
 
 			_mag_lpf.reset(mag_sample.mag);
 			_mag_counter = 1;
@@ -102,11 +110,14 @@ void Ekf::controlMagFusion()
 			_control_status.flags.synthetic_mag_z = false;
 		}
 
+		const bool mag_data_valid = checkMagField(mag_sample.mag);
+
 		const bool starting_conditions_passing = (_params.mag_fusion_type != MagFuseType::NONE)
 				&& _control_status.flags.tilt_align
 				&& !_control_status.flags.mag_fault
+				&& mag_data_valid
 				&& _mag_lpf.getState().longerThan(0.1f) // WMM magnitude 0.25-0.65 Gauss
-				&& (_mag_counter > 5) // wait until we have a few samples through the filter
+				&& (_mag_counter > 10) // wait until we have a few samples through the filter
 				&& (_state_reset_status.reset_count.quat == _state_reset_count_prev.quat) // no yaw reset this frame
 				&& (_control_status.flags.yaw_align == _control_status_prev.flags.yaw_align) // no yaw alignment change this frame
 				&& !_information_events.flags.yaw_aligned_to_imu_gps // don't allow starting on same frame as yaw estimator reset
@@ -114,6 +125,7 @@ void Ekf::controlMagFusion()
 
 		// allow mag to yaw align if necessary
 		if (!_control_status.flags.yaw_align) {
+
 			if (starting_conditions_passing
 			    && !magFieldStrengthDisturbed(_mag_lpf.getState())
 			    && !_control_status.flags.ev_yaw
@@ -121,6 +133,7 @@ void Ekf::controlMagFusion()
 				resetMagHeading(_mag_lpf.getState());
 				_control_status.flags.yaw_align = true;
 			}
+
 		}
 
 		controlMag3DFusion(mag_sample, starting_conditions_passing, _aid_src_mag);
@@ -133,7 +146,7 @@ void Ekf::controlMagFusion()
 	}
 }
 
-bool Ekf::checkHaglYawResetReq()
+bool Ekf::checkHaglYawResetReq() const
 {
 	// We need to reset the yaw angle after climbing away from the ground to enable
 	// recovery from ground level magnetic interference.
@@ -318,19 +331,81 @@ void Ekf::resetMagStates(const Vector3f &mag, bool reset_heading)
 
 bool Ekf::magFieldStrengthDisturbed(const Vector3f &mag_sample) const
 {
-	if (_params.check_mag_strength) {
+	if (_params.mag_check & static_cast<int32_t>(MagCheckMask::STRENGTH)) {
 		if (PX4_ISFINITE(_mag_strength_gps)) {
-			constexpr float wmm_gate_size = 0.2f; // +/- Gauss
-			return !isMeasuredMatchingExpected(mag_sample.length(), _mag_strength_gps, wmm_gate_size);
+			return !isMeasuredMatchingExpected(mag_sample.length(), _mag_strength_gps, _params.mag_check_strength_tolerance_gs);
 
 		} else {
 			constexpr float average_earth_mag_field_strength = 0.45f; // Gauss
 			constexpr float average_earth_mag_gate_size = 0.40f; // +/- Gauss
+
 			return !isMeasuredMatchingExpected(mag_sample.length(), average_earth_mag_field_strength, average_earth_mag_gate_size);
 		}
 	}
 
 	return false;
+}
+
+bool Ekf::checkMagField(const Vector3f &mag_sample)
+{
+	_control_status.flags.mag_field_disturbed = false;
+
+	if (_params.mag_check == 0) {
+		// skip all checks
+		return true;
+	}
+
+	bool is_check_failing = false;
+	_mag_strength = mag_sample.length();
+
+	if (_params.mag_check & static_cast<int32_t>(MagCheckMask::STRENGTH)) {
+		if (PX4_ISFINITE(_mag_strength_gps)) {
+			if (!isMeasuredMatchingExpected(_mag_strength, _mag_strength_gps, _params.mag_check_strength_tolerance_gs)) {
+				_control_status.flags.mag_field_disturbed = true;
+				is_check_failing = true;
+			}
+
+		} else if (_params.mag_check & static_cast<int32_t>(MagCheckMask::FORCE_WMM)) {
+			is_check_failing = true;
+
+		} else {
+			constexpr float average_earth_mag_field_strength = 0.45f; // Gauss
+			constexpr float average_earth_mag_gate_size = 0.40f; // +/- Gauss
+
+			if (!isMeasuredMatchingExpected(mag_sample.length(), average_earth_mag_field_strength, average_earth_mag_gate_size)) {
+				_control_status.flags.mag_field_disturbed = true;
+				is_check_failing = true;
+			}
+		}
+	}
+
+	const Vector3f mag_earth = _R_to_earth * mag_sample;
+	_mag_inclination = asinf(mag_earth(2) / fmaxf(mag_earth.norm(), 1e-4f));
+
+	if (_params.mag_check & static_cast<int32_t>(MagCheckMask::INCLINATION)) {
+		if (PX4_ISFINITE(_mag_inclination_gps)) {
+			const float inc_tol_rad = radians(_params.mag_check_inclination_tolerance_deg);
+			const float inc_error_rad = wrap_pi(_mag_inclination - _mag_inclination_gps);
+
+			if (fabsf(inc_error_rad) > inc_tol_rad) {
+				_control_status.flags.mag_field_disturbed = true;
+				is_check_failing = true;
+			}
+
+		} else if (_params.mag_check & static_cast<int32_t>(MagCheckMask::FORCE_WMM)) {
+			is_check_failing = true;
+
+		} else {
+			// No check possible when the global position is unknown
+			// TODO: add parameter to remember the inclination between boots
+		}
+	}
+
+	if (is_check_failing || (_time_last_mag_check_failing == 0)) {
+		_time_last_mag_check_failing = _time_delayed_us;
+	}
+
+	return ((_time_delayed_us - _time_last_mag_check_failing) > (uint64_t)_min_mag_health_time_us);
 }
 
 bool Ekf::isMeasuredMatchingExpected(const float measured, const float expected, const float gate)

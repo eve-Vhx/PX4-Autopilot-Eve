@@ -57,6 +57,8 @@
 
 bool Ekf::collect_gps(const gpsMessage &gps)
 {
+	const bool declination_was_valid = PX4_ISFINITE(_mag_declination_gps) && PX4_ISFINITE(_mag_inclination_gps) && PX4_ISFINITE(_mag_strength_gps);
+
 	// Run GPS checks always
 	_gps_checks_passed = gps_is_good(gps);
 
@@ -112,6 +114,15 @@ bool Ekf::collect_gps(const gpsMessage &gps)
 			_mag_strength_gps = get_mag_strength_gauss(lat, lon);
 
 			_earth_rate_NED = calcEarthRateNED((float)math::radians(lat));
+		}
+	}
+
+	if (!declination_was_valid) {
+		const bool declination_valid = PX4_ISFINITE(_mag_declination_gps) && PX4_ISFINITE(_mag_inclination_gps) && PX4_ISFINITE(_mag_strength_gps);
+
+		if (declination_valid) {
+			ECL_DEBUG("GPS WMM now valid");
+			_mag_wmm_gps_time_last_set_us = _time_delayed_us;
 		}
 	}
 

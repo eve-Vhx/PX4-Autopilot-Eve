@@ -45,13 +45,11 @@
  * Roll trim
  *
  * The trim value is the actuator control value the system needs
- * for straight and level flight. It can be calibrated by
- * flying manually straight and level using the RC trims and
- * copying them using the GCS.
+ * for straight and level flight.
  *
  * @group Radio Calibration
- * @min -0.25
- * @max 0.25
+ * @min -0.5
+ * @max 0.5
  * @decimal 2
  * @increment 0.01
  */
@@ -61,13 +59,11 @@ PARAM_DEFINE_FLOAT(TRIM_ROLL, 0.0f);
  * Pitch trim
  *
  * The trim value is the actuator control value the system needs
- * for straight and level flight. It can be calibrated by
- * flying manually straight and level using the RC trims and
- * copying them using the GCS.
+ * for straight and level flight.
  *
  * @group Radio Calibration
- * @min -0.25
- * @max 0.25
+ * @min -0.5
+ * @max 0.5
  * @decimal 2
  * @increment 0.01
  */
@@ -77,13 +73,11 @@ PARAM_DEFINE_FLOAT(TRIM_PITCH, 0.0f);
  * Yaw trim
  *
  * The trim value is the actuator control value the system needs
- * for straight and level flight. It can be calibrated by
- * flying manually straight and level using the RC trims and
- * copying them using the GCS.
+ * for straight and level flight.
  *
  * @group Radio Calibration
- * @min -0.25
- * @max 0.25
+ * @min -0.5
+ * @max 0.5
  * @decimal 2
  * @increment 0.01
  */
@@ -231,8 +225,6 @@ PARAM_DEFINE_FLOAT(COM_DISARM_PRFLT, 10.0f);
 
 /**
  * Allow arming without GPS
- *
- * The default allows the vehicle to arm without GPS signal.
  *
  * @group Commander
  * @value 0 Require GPS lock to arm
@@ -597,9 +589,6 @@ PARAM_DEFINE_INT32(COM_ARM_MAG_STR, 2);
  * immediately gives control back to the pilot by switching to Position mode and
  * if position is unavailable Altitude mode.
  * Note: Only has an effect on multicopters, and VTOLs in multicopter mode.
- *
- * This parameter is not considered in case of a GPS failure (Descend flight mode), where stick
- * override is always enabled.
  *
  * @min 0
  * @max 3
@@ -967,18 +956,6 @@ PARAM_DEFINE_INT32(COM_POWER_COUNT, 1);
 PARAM_DEFINE_FLOAT(COM_LKDOWN_TKO, 3.0f);
 
 /**
-* Enable preflight check for maximal allowed airspeed when arming.
-*
-* Deny arming if the current airspeed measurement is greater than half the cruise airspeed (FW_AIRSPD_TRIM).
-* Excessive airspeed measurements on ground are either caused by wind or bad airspeed calibration.
-*
-* @group Commander
-* @value 0 Disabled
-* @value 1 Enabled
-*/
-PARAM_DEFINE_INT32(COM_ARM_ARSP_EN, 1);
-
-/**
  * Enable FMU SD card detection check
  *
  * This check detects if the FMU SD card is missing.
@@ -1002,6 +979,20 @@ PARAM_DEFINE_INT32(COM_ARM_SDCARD, 1);
  * @boolean
  */
 PARAM_DEFINE_INT32(COM_ARM_HFLT_CHK, 1);
+
+/**
+ * Enable Drone ID system detection and health check
+ *
+ * This check detects if the Open Drone ID system is missing.
+ * Depending on the value of the parameter, the check can be
+ * disabled, warn only or deny arming.
+ *
+ * @group Commander
+ * @value 0 Disabled
+ * @value 1 Warning only
+ * @value 2 Enforce Open Drone ID system presence
+ */
+PARAM_DEFINE_INT32(COM_ARM_ODID, 0);
 
 /**
  * Enforced delay between arming and further navigation
@@ -1090,3 +1081,15 @@ PARAM_DEFINE_FLOAT(COM_WIND_MAX, -1.f);
  * @unit m
  */
 PARAM_DEFINE_FLOAT(COM_POS_LOW_EPH, -1.0f);
+
+/**
+ * Flag to allow arming
+ *
+ * Set 0 to prevent accidental use of the vehicle e.g. for safety or maintenance reasons.
+ *
+ * @boolean
+ * @value 0 Disallow arming
+ * @value 1 Allow arming
+ * @group Commander
+ */
+PARAM_DEFINE_INT32(COM_ARMABLE, 1);

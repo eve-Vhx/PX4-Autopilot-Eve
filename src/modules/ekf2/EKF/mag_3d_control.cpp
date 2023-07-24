@@ -83,13 +83,15 @@ void Ekf::controlMag3DFusion(const magSample &mag_sample, const bool common_star
 	const bool not_using_ne_aiding = !_control_status.flags.gps;
 	_control_status.flags.mag_dec = (_control_status.flags.mag && (not_using_ne_aiding || user_selected));
 
+	const bool wmm_updated = (_mag_wmm_gps_time_last_set_us > aid_src.time_last_fuse);
+
 	if (_control_status.flags.mag) {
 		aid_src.timestamp_sample = mag_sample.time_us;
 		aid_src.fusion_enabled = true;
 
 		if (continuing_conditions_passing) {
 
-			if (mag_sample.reset || checkHaglYawResetReq()) {
+			if (mag_sample.reset || checkHaglYawResetReq() || wmm_updated) {
 				ECL_INFO("reset to %s", AID_SRC_NAME);
 				resetMagStates(_mag_lpf.getState(), _control_status.flags.mag_hdg || _control_status.flags.mag_3D);
 				aid_src.time_last_fuse = _time_delayed_us;
@@ -147,7 +149,7 @@ void Ekf::controlMag3DFusion(const magSample &mag_sample, const bool common_star
 
 		} else {
 			// Stop fusion but do not declare it faulty
-			ECL_WARN("stopping %s fusion, continuing conditions failing", AID_SRC_NAME);
+			ECL_DEBUG("stopping %s fusion, continuing conditions no longer passing", AID_SRC_NAME);
 			stopMagFusion();
 		}
 
@@ -160,6 +162,7 @@ void Ekf::controlMag3DFusion(const magSample &mag_sample, const bool common_star
 
 			// activate fusion, reset mag states and initialize variance if first init or in flight reset
 			if (!_state.mag_I.longerThan(0.f)
+			    || wmm_updated
 			    || (_saved_mag_ef_covmat.diag().min() < sq(0.0001f)) || (_saved_mag_ef_covmat.diag().max() > sq(0.1f))
 			    || (_saved_mag_bf_covmat.diag().min() < sq(0.0001f)) || (_saved_mag_bf_covmat.diag().max() > sq(0.1f))
 			   ) {
