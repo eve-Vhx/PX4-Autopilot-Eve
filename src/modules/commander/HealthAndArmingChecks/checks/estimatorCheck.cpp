@@ -184,12 +184,17 @@ void EstimatorChecks::checkEstimatorStatus(const Context &context, Report &repor
 		/* EVENT
 		 * @description
 		 * <profile name="dev">
+		 * Measured strength: {1:.3}, expected: {2:.3} ± <param>EKF2_MAG_CHK_STR</param>
+		 * Measured inclination: {3:.3}, expected: {4:.3} ± <param>EKF2_MAG_CHK_INC</param>
 		 * This check can be configured via <param>COM_ARM_MAG_STR</param> and <param>EKF2_MAG_CHECK</param> parameters.
 		 * </profile>
 		 */
-		reporter.armingCheckFailure(required_groups_mag, health_component_t::local_position_estimate,
-					    events::ID("check_estimator_mag_interference"),
-					    events::Log::Warning, "Strong magnetic interference");
+		reporter.armingCheckFailure<float, float, float, float>(required_groups_mag,
+				health_component_t::local_position_estimate,
+				events::ID("check_estimator_mag_interference"),
+				events::Log::Warning, "Strong magnetic interference",
+				estimator_status.mag_strength_gs, estimator_status.mag_strength_ref_gs,
+				estimator_status.mag_inclination_deg, estimator_status.mag_inclination_ref_deg);
 
 		if (reporter.mavlink_log_pub()) {
 			mavlink_log_critical(reporter.mavlink_log_pub(), "Preflight Fail: Strong magnetic interference");
@@ -739,7 +744,9 @@ void EstimatorChecks::setModeRequirementFlags(const Context &context, bool pre_f
 
 	// run position and velocity accuracy checks
 	// Check if quality checking of position accuracy and consistency is to be performed
-	float lpos_eph_threshold_relaxed = _param_com_pos_fs_eph.get();
+	const float lpos_eph_threshold = (_param_com_pos_fs_eph.get() < 0) ? INFINITY : _param_com_pos_fs_eph.get();
+
+	float lpos_eph_threshold_relaxed = lpos_eph_threshold;
 
 	// Set the allowable position uncertainty based on combination of flight and estimator state
 	// When we are in a operator demanded position control mode and are solely reliant on optical flow,
@@ -762,11 +769,11 @@ void EstimatorChecks::setModeRequirementFlags(const Context &context, bool pre_f
 	}
 
 	failsafe_flags.global_position_invalid =
-		!checkPosVelValidity(now, xy_valid, gpos.eph, _param_com_pos_fs_eph.get(), gpos.timestamp,
+		!checkPosVelValidity(now, xy_valid, gpos.eph, lpos_eph_threshold, gpos.timestamp,
 				     _last_gpos_fail_time_us, !failsafe_flags.global_position_invalid);
 
 	failsafe_flags.local_position_invalid =
-		!checkPosVelValidity(now, xy_valid, lpos.eph, _param_com_pos_fs_eph.get(), lpos.timestamp,
+		!checkPosVelValidity(now, xy_valid, lpos.eph, lpos_eph_threshold, lpos.timestamp,
 				     _last_lpos_fail_time_us, !failsafe_flags.local_position_invalid);
 
 	failsafe_flags.local_position_invalid_relaxed =
